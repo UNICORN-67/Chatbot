@@ -3,9 +3,9 @@ from pyrogram import Client, filters
 # Initialize the bot with API ID, API Hash, and Bot Token
 app = Client(
     "my_bot",
-    api_id="9683694",
-    api_hash="c426d9f7087744afdafc961a620b6338",
-    bot_token="7792465751:AAEOjplYuBfQRI5XtV1rcBb7JGD3FQyZEYI"
+    api_id="",
+    api_hash="",
+    bot_token=""
 )
 
 @app.on_message(filters.command("start"))
