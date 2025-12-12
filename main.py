@@ -1,81 +1,169 @@
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import youtube_dl
-from pytube import YouTube
+# vcbot.py — Ultra Stable VC Music Bot (Single File)
+
 import os
 import asyncio
-import random
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pytgcalls import PyTgCalls, idle
+from pytgcalls.types.input_stream import InputStream
+from pytgcalls.types.input_stream.quality import HighQualityAudio
+from pytgcalls.types.stream import StreamAudioEnded
+from yt_dlp import YoutubeDL
+import ffmpeg
 
-# Config
-api_id = 16841147
-api_hash = "724367ca3534a7e37594fcf3512dc8ad"
-bot_token = "7493470667:AAEEgyqY3CKwKFeoct6uhJTUaW1djW1GTr0"
+# ================= CONFIG =================
+API_ID = int(os.getenv("API_ID", "16841147"))
+API_HASH = os.getenv("API_HASH", "724367ca3534a7e37594fcf3512dc8ad")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7493470667:AAEEgyqY3CKwKFeoct6uhJTUaW1djW1GTr0")
+# ==========================================
 
-# Group VC variables
-group_id = -1002301496075  # Replace with your group ID
-vc_id = None
+# Create folders
+os.makedirs("downloads", exist_ok=True)
 
-user_agents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-    'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/22.0.1207.1 Safari/537.1',
-    'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3111.101 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-]
+app = Client("vc_music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+vc = PyTgCalls(app)
 
-def get_user_agent():
-    return random.choice(user_agents)
+queue = {}   # {chat_id: [{"file": path, "title": title}]}
 
-ydl_opts = {
-    'outtmpl': '%(title)s.%(ext)s',
-    'format': 'bestaudio/best',
-    'postprocessors': [{
-        'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'mp3',
-        'preferredquality': '192',
-    }],
-    'user_agent': get_user_agent(),
-}
+# ============ YouTube Downloader ============
+def download(url):
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": "downloads/%(id)s.%(ext)s",
+        "quiet": True,
+        "nocheckcertificate": True,
+    }
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            path = ydl.prepare_filename(info)
+            return path, info.get("title", "Unknown")
+    except:
+        return None, None
 
-app = Client("music_bot", api_id, api_hash, bot_token=bot_token)
+
+# ============ Play System ==============
+async def play_stream(chat_id):
+    if chat_id not in queue or not queue[chat_id]:
+        return
+
+    data = queue[chat_id][0]
+    file_path = data["file"]
+
+    try:
+        # convert audio to raw 48k for 0-lag streaming
+        process = (
+            ffmpeg
+            .input(file_path)
+            .output("pipe:", format="s16le", acodec="pcm_s16le", ac=2, ar=48000)
+            .run_async(pipe_stdout=True, pipe_stderr=True)
+        )
+
+        await vc.join_group_call(
+            chat_id,
+            InputStream(
+                process.stdout,
+                HighQualityAudio(),
+            ),
+        )
+    except Exception as e:
+        print("Error:", e)
+
+
+# ============ On Song End =============
+@vc.on_stream_end()
+async def stream_end_handler(_, update: StreamAudioEnded):
+    chat_id = update.chat_id
+
+    if queue.get(chat_id):
+        queue[chat_id].pop(0)
+
+    if queue.get(chat_id):
+        await play_stream(chat_id)
+    else:
+        await vc.leave_group_call(chat_id)
+
+
+# ============ Commands ================
 
 @app.on_message(filters.command("start"))
-async def start(client, message):
-    await message.reply_text("Send me a song name or link to download")
+async def start(_, m: Message):
+    await m.reply("🎵 Stable VC Music Bot\nUse /play <song link>")
 
-@app.on_message(filters.command("join"))
-async def join_vc(client, message):
-    global vc_id
-    try:
-        vc_id = await client.join_group_call(group_id)
-        await message.reply_text("Joined VC!")
-    except Exception as e:
-        await message.reply_text(str(e))
-
-@app.on_message(filters.command("leave"))
-async def leave_vc(client, message):
-    global vc_id
-    try:
-        await client.leave_group_call(group_id)
-        vc_id = None
-        await message.reply_text("Left VC!")
-    except Exception as e:
-        await message.reply_text(str(e))
 
 @app.on_message(filters.command("play"))
-async def play(client, message):
-    global vc_id
-    try:
-        query = message.text.replace("/play ", "")
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-            url = info['entries'][0]['webpage_url']
-            title = info['entries'][0]['title']
-            await message.reply_text(f"Playing {title}...")
-            if vc_id is None:
-                await join_vc(client, message)
-            await client.send_audio(group_id, f"{title}.mp3")
-            os.remove(f"{title}.mp3")
-    except Exception as e:
-        await message.reply_text(str(e))
+async def play(_, m: Message):
+    if len(m.command) < 2:
+        return await m.reply("❗ Usage: /play <youtube link>")
 
-app.run()
+    link = m.text.split(maxsplit=1)[1]
+
+    msg = await m.reply("⏳ Downloading...")
+
+    file, title = download(link)
+    if not file:
+        return await msg.edit("❌ Failed to download!")
+
+    chat_id = m.chat.id
+
+    if chat_id not in queue:
+        queue[chat_id] = []
+
+    queue[chat_id].append({"file": file, "title": title})
+
+    if len(queue[chat_id]) == 1:
+        await msg.edit(f"🎧 Playing: **{title}**")
+        await play_stream(chat_id)
+    else:
+        await msg.edit(f"➕ Added to queue: **{title}**")
+
+
+@app.on_message(filters.command("pause"))
+async def pause(_, m: Message):
+    try:
+        await vc.pause_stream(m.chat.id)
+        await m.reply("⏸ Paused")
+    except:
+        await m.reply("❗ Nothing is playing")
+
+
+@app.on_message(filters.command("resume"))
+async def resume(_, m: Message):
+    try:
+        await vc.resume_stream(m.chat.id)
+        await m.reply("▶️ Resumed")
+    except:
+        await m.reply("❗ Nothing is paused")
+
+
+@app.on_message(filters.command("skip"))
+async def skip(_, m: Message):
+    chat_id = m.chat.id
+    if chat_id in queue and len(queue[chat_id]) > 1:
+        queue[chat_id].pop(0)
+        await play_stream(chat_id)
+        return await m.reply("⏭ Skipped!")
+    await m.reply("❗ No next track")
+
+
+@app.on_message(filters.command("stop"))
+async def stop(_, m: Message):
+    chat_id = m.chat.id
+    try:
+        queue[chat_id] = []
+        await vc.leave_group_call(chat_id)
+        await m.reply("⏹ Stopped")
+    except:
+        await m.reply("❗ Bot not in VC")
+
+
+# ============ Start Bot =============
+async def main():
+    await app.start()
+    await vc.start()
+    print("Bot is running without lag 🚀")
+    await idle()
+    await app.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
