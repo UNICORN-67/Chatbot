@@ -2,9 +2,9 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import youtube_dl
 
-api_id = 12345678
-api_hash = "your_api_hash"
-bot_token = "your_bot_token"
+api_id = 16841147
+api_hash = "724367ca3534a7e37594fcf3512dc8ad"
+bot_token = "7493470667:AAEEgyqY3CKwKFeoct6uhJTUaW1djW1GTr0"
 
 app = Client("music_bot", api_id, api_hash, bot_token=bot_token)
 
