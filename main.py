@@ -1,7 +1,10 @@
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import youtube_dl
+from pytube import YouTube
+import os
 
+# Config
 api_id = 16841147
 api_hash = "724367ca3534a7e37594fcf3512dc8ad"
 bot_token = "7493470667:AAEEgyqY3CKwKFeoct6uhJTUaW1djW1GTr0"
@@ -33,6 +36,20 @@ async def music(client, message):
             await message.reply_text(f"Downloading {title}...")
             ydl.download([url])
             await message.reply_audio(f"{title}.mp3")
+            os.remove(f"{title}.mp3")
+    except Exception as e:
+        await message.reply_text(str(e))
+
+@app.on_message(filters.command("play"))
+async def play(client, message):
+    try:
+        query = message.text.replace("/play ", "")
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            url = info['entries'][0]['webpage_url']
+            title = info['entries'][0]['title']
+            await message.reply_text(f"Playing {title}...")
+            os.system(f"ffmpeg -i $(youtube-dl -f bestaudio --get-url {url}) -f s16le -ar 48000 pipe:1 | ffmpeg -i - -f opus -ar 48000 pipe:1 | vlc -")
     except Exception as e:
         await message.reply_text(str(e))
 
